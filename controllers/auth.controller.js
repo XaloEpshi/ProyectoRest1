@@ -1,39 +1,51 @@
 const mysqlPool = require('../mysqlConfig');
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
-const secret = require('../config/authConfig').secret;
+const bcrypt = require('bcrypt');
+require('dotenv').config(); 
+
+const secret = process.env.SECRET_KEY;
 
 // Registro de clientes
-exports.registrarCliente = (req, res) => {
+exports.registrarCliente = async (req, res) => {
     const { nombre, correo, contraseña } = req.body;
+    
+    if (!nombre || !correo || !contraseña) {
+        return res.status(400).json({ error: 'Todos los campos son requeridos' });
+    }
+
     const hashedPassword = bcrypt.hashSync(contraseña, 8);
 
-    const query = 'INSERT INTO usuarios (nombre, correo, contraseña, rol) VALUES (?, ?, ?, ?)';
-    const values = [nombre, correo, hashedPassword, 'Cliente'];
+    const checkQuery = 'SELECT * FROM clientes WHERE correo = ?';
+    const insertQuery = 'INSERT INTO clientes (nombre, correo, contraseña) VALUES (?, ?, ?)';
+    const values = [nombre, correo, hashedPassword];
 
-    mysqlPool.query(query, values, (error, results) => {
-        if (error) {
-            console.error('Error al registrar el cliente:', error);
-            return res.status(500).json({ error: 'Error al registrar el cliente' });
+    try {
+        const [existingUser] = await mysqlPool.promise().query(checkQuery, [correo]);
+
+        if (existingUser.length > 0) {
+            return res.status(409).json({ error: 'El correo electrónico ya está registrado' });
         }
+
+        await mysqlPool.promise().query(insertQuery, values);
         res.status(201).json({ message: 'Cliente registrado correctamente' });
-    });
+    } catch (error) {
+        console.error('Error al registrar el cliente:', error);
+        res.status(500).json({ error: 'Error al registrar el cliente' });
+    }
 };
 
 // Login de clientes
-exports.loginCliente = (req, res) => {
+exports.loginCliente = async (req, res) => {
     const { correo, contraseña } = req.body;
 
     if (!correo || !contraseña) {
         return res.status(400).json({ error: 'Correo y contraseña son requeridos' });
     }
 
-    const query = 'SELECT * FROM usuarios WHERE correo = ?';
-    mysqlPool.query(query, [correo], (error, results) => {
-        if (error) {
-            console.error('Error al buscar el cliente:', error);
-            return res.status(500).json({ error: 'Error al buscar el cliente' });
-        }
+    const query = 'SELECT * FROM clientes WHERE correo = ?';
+    
+    try {
+        const [results] = await mysqlPool.promise().query(query, [correo]);
 
         if (results.length === 0) {
             return res.status(404).json({ error: 'Cliente no encontrado' });
@@ -46,13 +58,19 @@ exports.loginCliente = (req, res) => {
             return res.status(401).json({ error: 'Contraseña incorrecta' });
         }
 
-        const token = jwt.sign({ id: cliente.idUsuario, role: cliente.rol }, secret, {
+        const token = jwt.sign({ id: cliente.idCliente }, secret, {
             expiresIn: '24h' // 24 horas
         });
 
         res.status(200).json({ message: 'Inicio de sesión exitoso', token });
-    });
+    } catch (error) {
+        console.error('Error al buscar el cliente:', error);
+        res.status(500).json({ error: 'Error al buscar el cliente' });
+    }
 };
+
+
+
 
 // Crear una nueva promocion
 exports.crearPromocion = (req, res) => {
